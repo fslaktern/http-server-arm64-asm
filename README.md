@@ -1,0 +1,41 @@
+# HTTP server in ARM64 assembly
+
+## Features
+
+- CLI arguments to specify interface and port to listen on
+- GET requests read files from current directory
+- POST requests write to arbitrary files from current directory
+- Path traversal protection by removing `.` from request path
+- Can run on your phone
+
+## Setup
+
+Required binaries:
+
+- qemu-aarch64
+- aarch64-linux-gnu-as
+- aarch64-linux-gnu-ld
+
+``` sh
+sudo apt-get install -y binutils-aarch64-linux-gnu qemu-user
+```
+
+## Usage
+
+``` sh
+make build
+make run
+# HTTP server listening on 0.0.0.0:80
+```
+
+## Known bugs
+
+- None
+
+## TODOs
+
+- Replace `ldr` and `str` with `ldm` and `stm` for chunked read and write
+- Replace `add` and `sub` with signed equivalents and check for `-1`
+- Make sure return code for all function calls are not error values
+  - Return code is returned in x1, and value in x0
+- Implementations
