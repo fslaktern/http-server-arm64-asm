@@ -52,8 +52,9 @@ qemu-aarch64 -g 1234 ./server 127.0.0.1 8000
 ### Terminal #2
 
 ``` sh
-pwndbg
-# or just gdb
+pwndbg server
+# or
+# gdb-multiarch server
 ```
 
 ``` text
