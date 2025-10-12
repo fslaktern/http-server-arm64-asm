@@ -12,7 +12,7 @@
 
 Required binaries:
 
-- qemu-aarch64
+- qemu-aarch64 or an aarch64 CPU
 - aarch64-linux-gnu-as
 - aarch64-linux-gnu-ld
 
@@ -39,3 +39,25 @@ make run
 - Make sure return code for all function calls are not error values
   - Return code is returned in x1, and value in x0
 - Implementations
+
+## Debugging workflow
+
+### Terminal #1
+
+``` sh
+make build
+qemu-aarch64 -g 1234 ./server 127.0.0.1 8000
+```
+
+### Terminal #2
+
+``` sh
+pwndbg
+# or just gdb
+```
+
+``` text
+pwndbg> target remote :1234
+pwndbg> ni
+```
+

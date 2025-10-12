@@ -1,17 +1,32 @@
-.global _start
+# STATIC REGISTERS
+# x19: IP as string
+# x20: Port as string
+# x21: IP as int
+# x22: Port as big endian int
+# x23: Server socket file descriptor
+# x24: Client socket file descriptor
+# x25: Requested file file descriptor
 
-.equ sys_openat, 56
-.equ sys_close, 57
-.equ sys_lseek, 62
-.equ sys_read, 63
-.equ sys_write, 64
-.equ sys_exit, 93
-.equ sys_socket, 198
-.equ sys_bind, 200
-.equ sys_listen, 201
-.equ sys_accept, 202
-.equ sys_clone, 220
-.equ sys_seccomp, 277
+    .global _start
+
+    .equ sys_openat, 56
+    .equ sys_close, 57
+    .equ sys_lseek, 62
+    .equ sys_read, 63
+    .equ sys_write, 64
+    .equ sys_exit, 93
+    .equ sys_getpid, 172
+    .equ sys_socket, 198
+    .equ sys_bind, 200
+    .equ sys_listen, 201
+    .equ sys_accept, 202
+    .equ sys_clone, 220
+    .equ sys_seccomp, 277
+
+    .equ AF_INET, 2
+    .equ SOCK_STREAM, 1
+    .equ IPPROTO_TCP, 0
+    .equ O_CLOEXEC, 02000000
 
 .text
 _start:
@@ -29,25 +44,104 @@ parse_args:
 
     # ipv4 to int
     mov x0, x19
-    bl ipv4_to_int
-    mov x19, x0
+    bl inet_aton
+    cbnz x1, exit_err
+    mov x21, x0
 
     # convert port to int then to network byte order
     mov x0, x20
+
     bl atoi
+    # exit if function returns err
+    cbnz x1, exit_err
+
     bl htons
-    mov x20, x0
+    mov x22, x0
+
+create_socket:
+    # server_sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+    mov x0, #AF_INET
+    mov x1, #SOCK_STREAM
+    mov x2, #IPPROTO_TCP
+    mov x8, #sys_socket
+    svc #0
+    mov x23, x0
+
+bind_socket:
+    # create instance of struct sockaddr_in
+    ldr x0, =sockaddr_in_buffer
+
+    # set sin_family (short)
+    mov w1, #2
+    strh w1, [x0, #0]
+
+    # set sin_port (unsigned short)
+    mov w1, w22
+    strh w1, [x0, #2]
+
+    # set sin_addr (unsigned int)
+    mov w1, w21
+    str w1, [x0, #4]
+
+    # bind(server_sockfd, sockaddr, socklen)
+    mov x0, x23
+    ldr x1, =sockaddr_in_buffer
+    mov x2, #sockaddr_in_size
+    mov x8, #sys_bind
+    svc #0
+
+listen_socket:
+    # listen(server_sockfd, backlog=0)
+    mov x0, x23
+    mov x1, #0
+    mov x8, #sys_listen
+    svc #0
+
+serve_loop:
+accept_connection:
+    # accept(server_sockfd, *sockaddr, *sockaddr_size, O_CLOEXEC)
+    mov x0, x23
+    ldr x1, =sockaddr_in_buffer
+    ldr x2, =sockaddr_in_size
+    # Why O_CLOEXEC: https://tzimmermann.org/2017/08/17/file-descriptors-during-fork-and-exec/
+    mov x3, #O_CLOEXEC
+    mov x8, #sys_accept
+    svc #0
+    # save client_sockfd
+    mov x24, x0
+
+    b father_leave
+
+child_birth:
+    # Create a new child process
+    mov x8, #sys_clone
+    svc #0
+
+    # Only way to distinguish parent from child, is by checking pid of current process (after fork, there are 2 processes: one parent and one child)
+    # Parent will keep its original PID, but child will have PID 0
+    mov x8, #sys_getpid
+    svc #0
+    # Branch if pid indicates that current process is the child
+    cbz x0, child_must_go_on
+    # If not child, thus parent: leave immediatly
+
+father_leave:
+    # Close newly opened client_sockfd
+    mov x0, x24
+    mov x8, #sys_close
+    svc #0
+
+    # Listen for more connections
+    # b serve_loop
+
+child_must_go_on:
+    # Close listening server_sockfd
+    mov x0, x23
+    mov x8, #sys_close
+    svc #0
 
     b exit
 
-create_socket:
-bind_socket:
-listen_socket:
-serve_loop:
-accept_connection:
-child_birth:
-father_leave:
-child_must_go_on:
 handle_request:
 read_http_verb:
 read_http_path:
@@ -63,19 +157,19 @@ handle_post:
 .handle_get_finish:
 
 close_requested_file:
-    mov x0, x21
+    mov x0, x25
     mov x8, #sys_close
     svc #0
 
 send_response:
-    mov x0, x20
+    mov x0, x24
     ldr x1, =egress_buffer
     ldr x2, =egress_buffer_size
     mov x8, #sys_write
     svc #0
 
 close_client_connection:
-    mov x0, x20
+    mov x0, x24
     mov x8, #sys_close
     svc #0
 
@@ -93,6 +187,8 @@ invalid_args:
     mov x8, #sys_write
     svc #0
 
+    b exit_err
+
 exit_err:
     mov x0, #1
     mov x8, #sys_exit
@@ -103,27 +199,65 @@ exit_err:
     # convert port from little endian to network endian
     # x0: little endian int
 htons:
+    rev16 x0, x0
     ret
 
-    # convert ipv4 to 32 bit int
+    # convert ipv4 to 32 bit int in network byte order
     # x0: ipv4 string
-ipv4_to_int:
-    # get first octet
-    # convert octet to int
-    # bitshift and add int to result
+inet_aton:
+    # ipv4 string
+    mov x9, x0
+    # result
+    mov x10, #0
+    # loop counter
+    mov x11, #0
+    # loop counter max
+    mov x12, #4
+    # string cursor
+    mov x13, #0
 
-    # get second octet
-    # convert octet to int
-    # bitshift and add int to result
+.inet_aton_per_octet:
+    cmp x11, x12
+    b.ge .inet_aton_done
 
-    # get third octet
-    # convert octet to int
-    # bitshift and add int to result
+    # get octet
+    ldr x1, =ip_octet_buffer
+    # offset from start of string
+    add x1, x1, x13
+    # read until '.'
+    mov x2, #46
+    # allow reading more than 3 digits, to catch invalid values
+    ldr x3, =ip_octet_buffer_max
+    # x3: max read length
+    bl strntok
+    # add length of substr
+    add x13, x13, x0
+    # add one to account for '.'
+    add x13, x13, #1
 
-    # get fourth octet
     # convert octet to int
+    ldr x0, =ip_octet_buffer
+    bl atoi
+    # fail if int is larger than 255
+    cmp x0, #255
+    b.gt .inet_aton_fail
+
     # bitshift and add int to result
+    lsl x10, x10, 4
+    orr x10, x10, x0
+
+    # increment and loop
+    add x11, x11, #1
+    b .inet_aton_per_octet
+.inet_aton_done:
+    # swap endiannes of result
+    rev x0, x10
+    eor x1, x1, x1
     ret
+.inet_aton_fail:
+    mov x1, #1
+    ret
+
 
     # convert string formatted number to 64 bit integer
     # x0: null padded string
@@ -134,38 +268,38 @@ ipv4_to_int:
 atoi:
     # store result
     mov x9, #0
-    # multiplier: 1, 10, 100, ...
-    mov x10, #1
-    # multiplier for multiplier
-    mov x14, #10
+    # multiplier
+    mov x10, #10
     # number string
     mov x11, x0
+    # index
+    mov x12, #0
 
-    bl strlen
-    # length of string
-    mov x12, x0
-
-    # loop from end to start
+    # loop over each digit, most significant to least significant
 .atoi_loop:
-    ldrb x13, [x11, x12]
+    ldrb w13, [x11, x12]
+
+    # if byte is null byte, we are done
+    cbz x13, .atoi_done
+
     # make sure ascii value of digit is not less than that of "0"
     cmp x13, 48
     b.lt .atoi_fail
 
     # make sure ascii value of digit is not more than that of "9"
     cmp x13, 57
-    b.bt .atoi_fail
+    b.gt .atoi_fail
 
     # convert string digit to integer digit
-    sub x13, 48
+    sub x13, x13, 48
 
-    # multiply with multiplier and add to result
-    madd x9, x13, x10, x9
-    mul x10, x10, x14
+    # multiply with 10 and add digit
+    mul x9, x9, x10
+    add x9, x9, x13
 
     # loop
-    sub x12, x12, #1
-    cbnz .atoi_loop
+    add x12, x12, #1
+    b .atoi_loop
 
 .atoi_done:
     mov x0, x9
@@ -180,17 +314,18 @@ atoi:
     # x2: delimiter
     # x3: max read length
 strntok:
-    eor x22, x22, x22
+    eor x4, x4, x4
 .strntok_loop:
-    cmp x3, x22
+    cmp x4, x3
     b.ge .strntok_done
-    ldrb w11, [x0, x22]
+    ldrb w11, [x0, x4]
     cmp w11, w2
     b.eq .strntok_done
-    strb w11, [x1, x22]
+    strb w11, [x1, x4]
+    add x4, x4, #1
     b .strntok_loop
 .strntok_done:
-    mov x0, x22
+    mov x0, x4
     ret
 
     # x0: haystack
@@ -282,6 +417,21 @@ memcpy:
 
 .data
 .align 4
+sockaddr_in_buffer:
+    # sin_family
+    .space 2
+    # sin_port
+    .space 2
+    # sin_addr
+    .space 4
+    # sin_zero
+    .space 8
+    sockaddr_in_size = . - sockaddr_in_buffer
+
+ip_octet_buffer:
+    .space 4
+    ip_octet_buffer_max = . - ip_octet_buffer
+
 ingress_buffer:
     .space 4096
     ingress_buffer_max = . - ingress_buffer
