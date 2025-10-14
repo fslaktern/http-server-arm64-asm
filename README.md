@@ -34,11 +34,18 @@ make run
 
 ## TODOs
 
-- Replace `ldr` and `str` with `ldm` and `stm` for chunked read and write
-- Replace `add` and `sub` with signed equivalents and check for `-1`
+- Replace `add` and `sub` with signed equivalents and check for negative numbers
+- Save LR in `_start`
 - Make sure return code for all function calls are not error values
   - Return code is returned in x1, and value in x0
+- Print error messages
 - Implementations
+
+### Tests
+
+- IPv4 address with more than 3 digits per octet
+- IPv4 address with no digits, only 3 dots
+- Port larger than 65535
 
 ## Debugging workflow
 
