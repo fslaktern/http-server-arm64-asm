@@ -40,6 +40,7 @@
     .equ SOCK_STREAM, 1
     .equ IPPROTO_TCP, 0
     .equ O_CLOEXEC, 02000000
+    .equ O_RDONLY, 0
     .equ AT_FDCWD, -100
 
 .text
@@ -79,6 +80,7 @@ parse_args:
 create_socket:
     # server_sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
     mov x0, #AF_INET
+    # Consider SOCK_STREAM | SOCK_CLOEXEC
     mov x1, #SOCK_STREAM
     mov x2, #IPPROTO_TCP
     mov x8, #sys_socket
@@ -117,16 +119,24 @@ listen_socket:
 
 serve_loop:
 accept_connection:
-    # accept(server_sockfd, *sockaddr, *sockaddr_size, O_CLOEXEC)
+    # accept(server_sockfd, *sockaddr, *sockaddr_size, 0)
     mov x0, x23
     ldr x1, =sockaddr_in_buffer
     ldr x2, =sockaddr_in_size
-    # Why O_CLOEXEC: https://tzimmermann.org/2017/08/17/file-descriptors-during-fork-and-exec/
-    mov x3, #O_CLOEXEC
+    mov x3, #0
     mov x8, #sys_accept
     svc #0
+
     # save client_sockfd
     mov x24, x0
+
+    # DEBUG print return value:
+    mov x0, #1
+    ldr x1, =argument_error
+    mov x2, x24
+    mov x8, #sys_write
+    svc #0
+    # DEBUG done
 
     b father_leave
 
@@ -187,19 +197,19 @@ read_http_path:
     add x0, x0, #1
 
     ldr x1, =http_request_path
-    mov x2, 0x20
+    mov x2, #' '
     ldr x3, =http_request_path_max
     bl strntok
 
 current_directory_fd:
-    ;; mov x0, #0
-    ;; ldr x1, serve_directory
-    ;; mov x2,
-    ;; mov x3, O_DIRECTORY
-    ;; eor x4, x4, x4
-    ;; mov x8, #sys_openat
-    ;; svc #0
-    ;; mov x25, x0
+    # mov x0, #0
+    # ldr x1, serve_directory
+    # mov x2,
+    # mov x3, O_DIRECTORY
+    # eor x4, x4, x4
+    # mov x8, #sys_openat
+    # svc #0
+    # mov x25, x0
 
 branch_on_http_verb:
     # http_request_verb == "GET"
