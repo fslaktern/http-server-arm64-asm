@@ -45,25 +45,33 @@
 
 .text
 _start:
+    # set stack frame size = 0
     mov x29, sp
 
 parse_args:
-    # get argc but discard program name
-    ldp x3, xzr, [sp], #16
+    # stack
+    # 00:0000│  sp 0x666ac3fff740 ◂— 3
+    # 01:0008│     0x666ac3fff748 —▸ 0x666ac3fffa20 ◂— './server'
+    # 02:0010│     0x666ac3fff750 —▸ 0x666ac3fffa29 ◂— 0x302e302e302e30 '0.0.0.0'
+    # 03:0018│     0x666ac3fff758 —▸ 0x666ac3fffa31 ◂— 0x5f4d524554003038 '80'
+    # [sp] = argc and [sp + 8..n8] = argv
 
+    # store argc in x3, ignore progname
+    # post-increment sp to addr of first argument to program
+    ldp x3, xzr, [sp], #16
     cmp x3, #3
     b.ne invalid_args
 
-    # load first and second argument
+    # load ip addr and port str args to x19 and x20
     ldp x19, x20, [sp], #16
 
-    # ipv4 to int
+    # ipv4 to 32 bit int
     mov x0, x19
     bl inet_aton
     cbnz x1, exit_err
     mov x21, x0
 
-    # convert port to int then to network byte order
+    # convert port to int then to network byte order (big endian)
     mov x0, x20
 
     bl atoi
@@ -119,24 +127,16 @@ listen_socket:
 
 serve_loop:
 accept_connection:
-    # accept(server_sockfd, *sockaddr, *sockaddr_size, 0)
+    # accept(server_sockfd, *clientaddr_buf, *clientaddr_len, 0)
     mov x0, x23
-    ldr x1, =sockaddr_in_buffer
-    ldr x2, =sockaddr_in_size
+    ldr x1, =clientaddr_buffer
+    ldr x2, =clientaddr_len
     mov x3, #0
     mov x8, #sys_accept
     svc #0
 
     # save client_sockfd
     mov x24, x0
-
-    # DEBUG print return value:
-    mov x0, #1
-    ldr x1, =argument_error
-    mov x2, x24
-    mov x8, #sys_write
-    svc #0
-    # DEBUG done
 
     b father_leave
 
@@ -150,7 +150,7 @@ child_birth:
     mov x8, #sys_getpid
     svc #0
     # Branch if pid indicates that current process is the child
-    cbz x0, child_must_go_on
+    cbz x0, child_must_grow_up
     # If not child, thus parent: leave immediatly
 
 father_leave:
@@ -160,9 +160,9 @@ father_leave:
     svc #0
 
     # Listen for more connections
-    # b serve_loop
+    b serve_loop
 
-child_must_go_on:
+child_must_grow_up:
     # Close listening server_sockfd
     mov x0, x23
     mov x8, #sys_close
@@ -627,6 +627,22 @@ sockaddr_in_buffer:
     # sin_zero
     .space 8
     sockaddr_in_size = . - sockaddr_in_buffer
+
+    # No IPv6 support
+clientaddr_buffer:
+    # sin_family
+    .space 2
+    # sin_port
+    .space 2
+    # sin_addr
+    .space 4
+    # sin_zero
+    .space 8
+    clientaddr_size = . - clientaddr_buffer
+
+clientaddr_len:
+    .word clientaddr_size
+
 
 ip_octet_buffer:
     .space 4
